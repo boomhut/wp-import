@@ -549,6 +549,185 @@ func SanitizeWordPressContent(content string) string {
 	return content
 }
 
+// CleanHTML sanitizes WordPress HTML content while preserving HTML structure
+// This returns valid, cleaned HTML that can be used for display or further processing
+func CleanHTML(content string) string {
+	// First, use the base sanitize function to remove Gutenberg blocks
+	content = SanitizeWordPressContent(content)
+
+	// Fix common HTML issues in WordPress content
+
+	// Fix unclosed or improperly nested tags (simple cases)
+	content = fixUnclosedTags(content)
+
+	// Remove empty or unnecessary attributes
+	content = cleanAttributes(content)
+
+	// Convert deprecated tags to modern HTML5 equivalents
+	content = updateDeprecatedTags(content)
+
+	// Fix malformed lists
+	content = fixListStructure(content)
+
+	return content
+}
+
+// Helper function to fix unclosed or improperly nested tags
+func fixUnclosedTags(content string) string {
+	// This is a simplified approach - for a complete solution,
+	// a proper HTML parser would be needed
+
+	// Fix common unclosed tags
+	unclosedTags := []string{"p", "div", "span", "li", "ol", "ul", "strong", "em", "a"}
+	for _, tag := range unclosedTags {
+		openCount := strings.Count(content, "<"+tag)
+		closeCount := strings.Count(content, "</"+tag)
+
+		// If there are more opening than closing tags, add missing closing tags
+		if openCount > closeCount {
+			for i := 0; i < (openCount - closeCount); i++ {
+				content = content + "</" + tag + ">"
+			}
+		}
+	}
+
+	return content
+}
+
+// Helper function to clean up HTML attributes
+func cleanAttributes(content string) string {
+	// Remove empty class attributes
+	content = regexp.MustCompile(`class=["']\s*["']`).ReplaceAllString(content, "")
+
+	// Remove WordPress-specific classes with more thorough pattern
+	content = regexp.MustCompile(`class=["']([^"']*?)(wp-[a-zA-Z0-9_-]+|align[a-z]+|block-[a-z0-9-]+)([^"']*?)["']`).
+		ReplaceAllStringFunc(content, func(match string) string {
+			// Extract the class attribute
+			re := regexp.MustCompile(`class=["']([^"']*)["']`)
+			classes := re.FindStringSubmatch(match)
+			if len(classes) > 1 {
+				// Remove WordPress-specific classes
+				classList := strings.Fields(classes[1])
+				var cleanClasses []string
+				for _, class := range classList {
+					if !strings.HasPrefix(class, "wp-") &&
+						!strings.HasPrefix(class, "block-") &&
+						!regexp.MustCompile(`^align(left|right|center|none|wide|full)$`).MatchString(class) {
+						cleanClasses = append(cleanClasses, class)
+					}
+				}
+
+				// If no classes remain, return empty string to remove the attribute
+				if len(cleanClasses) == 0 {
+					return ""
+				}
+
+				// Otherwise, return the cleaned class attribute
+				return fmt.Sprintf(`class="%s"`, strings.Join(cleanClasses, " "))
+			}
+			return match
+		})
+
+	// Clean up empty class attributes after removing WordPress classes
+	content = regexp.MustCompile(`class=["']\s*["']`).ReplaceAllString(content, "")
+
+	// Clean up style attributes with empty content
+	content = regexp.MustCompile(`style=["']\s*["']`).ReplaceAllString(content, "")
+
+	// Remove data attributes - more thorough pattern for WordPress-specific ones
+	content = regexp.MustCompile(`\s+data-(wp-[a-zA-Z0-9_-]+=["'][^"']*["']|align=["'][^"']*["']|block=["'][^"']*["'])`).ReplaceAllString(content, "")
+
+	// Remove other WordPress-specific data attributes
+	content = regexp.MustCompile(`\s+data-[a-zA-Z0-9_-]+=["'][^"']*["']`).ReplaceAllString(content, "")
+
+	// Remove empty attributes
+	content = cleanEmptyAttributes(content)
+
+	return content
+}
+
+// Helper function to clean empty attributes
+func cleanEmptyAttributes(content string) string {
+	// Clean up attributes that are empty
+	attrNames := []string{"id", "class", "style", "title"}
+	for _, attr := range attrNames {
+		// Remove the attribute if it's empty
+		pattern := fmt.Sprintf(`%s=["']\s*["']`, attr)
+		re := regexp.MustCompile(pattern)
+		content = re.ReplaceAllString(content, "")
+	}
+
+	// Clean up multiple spaces between attributes
+	content = regexp.MustCompile(`\s{2,}`).ReplaceAllString(content, " ")
+
+	// Clean up spaces around tag brackets
+	content = regexp.MustCompile(`\s+>`).ReplaceAllString(content, ">")
+
+	return content
+}
+
+// Helper function to update deprecated HTML tags
+func updateDeprecatedTags(content string) string {
+	// Convert <center> to styled div
+	content = regexp.MustCompile(`<center([^>]*)>(.*?)</center>`).
+		ReplaceAllString(content, `<div$1 style="text-align: center;">$2</div>`)
+
+	// Convert <font> to span
+	content = regexp.MustCompile(`<font([^>]*)>(.*?)</font>`).
+		ReplaceAllString(content, `<span$1>$2</span>`)
+
+	// Convert <b> to <strong>
+	content = regexp.MustCompile(`<b([^>]*)>(.*?)</b>`).
+		ReplaceAllString(content, `<strong$1>$2</strong>`)
+
+	// Convert <i> to <em>
+	content = regexp.MustCompile(`<i([^>]*)>(.*?)</i>`).
+		ReplaceAllString(content, `<em$1>$2</em>`)
+
+	return content
+}
+
+// Helper function to fix list structure
+func fixListStructure(content string) string {
+	// Fix common list issues:
+
+	// 1. Ensure list items are inside lists
+	content = regexp.MustCompile(`(?s)<li([^>]*)>(.*?)</li>`).
+		ReplaceAllStringFunc(content, func(match string) string {
+			// Check if this list item is not already inside a list
+			before := regexp.MustCompile(`<[ou]l[^>]*>`).MatchString(match)
+			after := strings.Contains(content, match+"</ul>") || strings.Contains(content, match+"</ol>")
+
+			if !before && !after {
+				re := regexp.MustCompile(`(?s)<li([^>]*)>(.*?)</li>`)
+				matches := re.FindStringSubmatch(match)
+				if len(matches) > 2 {
+					return "<ul>" + match + "</ul>"
+				}
+			}
+			return match
+		})
+
+	// 2. Fix nested lists
+	content = regexp.MustCompile(`(?s)(<[ou]l[^>]*>)(.*?)(<[ou]l[^>]*>)(.*?)(</[ou]l>)(.*?)(</[ou]l>)`).
+		ReplaceAllString(content, `$1$2<li>$3$4$5</li>$6$7`)
+
+	return content
+}
+
+// Helper function to remove empty paragraphs
+func removeEmptyParagraphs(content string) string {
+	// Remove empty <p></p> tags
+	re1 := regexp.MustCompile(`<p>\s*</p>`)
+	content = re1.ReplaceAllString(content, "")
+
+	// Remove paragraphs with only whitespace or <br> tags
+	re2 := regexp.MustCompile(`<p>\s*(<br\s*/?>\s*)*</p>`)
+	content = re2.ReplaceAllString(content, "")
+
+	return content
+}
+
 // Helper function to remove Gutenberg block comments
 func removeGutenbergComments(content string) string {
 	// Remove opening block comments like <!-- wp:paragraph -->
@@ -579,21 +758,15 @@ func cleanWhitespace(content string) string {
 	return strings.TrimSpace(content)
 }
 
-// Helper function to remove empty paragraphs
-func removeEmptyParagraphs(content string) string {
-	// Remove empty <p></p> tags
-	re1 := regexp.MustCompile(`<p>\s*</p>`)
-	content = re1.ReplaceAllString(content, "")
-
-	// Remove paragraphs with only whitespace or <br> tags
-	re2 := regexp.MustCompile(`<p>\s*(<br\s*/?>\s*)*</p>`)
-	content = re2.ReplaceAllString(content, "")
-
-	return content
-}
-
 // ConvertToPlainText removes all HTML tags and returns plain text
 func ConvertToPlainText(content string) string {
+	// First check if we're dealing with nested lists
+	if strings.Contains(content, "<ul") && strings.Contains(content, "<li") &&
+		regexp.MustCompile(`<li[^>]*>.*?<ul[^>]*>`).MatchString(content) {
+		return NestedListsToPlainText(content)
+	}
+
+	// If not nested lists, proceed with normal conversion
 	// First sanitize WordPress content
 	content = SanitizeWordPressContent(content)
 
@@ -626,6 +799,13 @@ func ConvertToPlainText(content string) string {
 
 // ConvertToMarkdown converts WordPress content to Markdown format
 func ConvertToMarkdown(content string) string {
+	// First check if we're dealing with nested lists
+	if strings.Contains(content, "<ul") && strings.Contains(content, "<li") &&
+		regexp.MustCompile(`<li[^>]*>.*?<ul[^>]*>`).MatchString(content) {
+		return NestedListsToMarkdown(content)
+	}
+
+	// If not nested lists, proceed with normal conversion
 	// First sanitize WordPress content
 	content = SanitizeWordPressContent(content)
 
@@ -744,6 +924,11 @@ func convertOrderedLists(content string) string {
 
 // Helper function to convert unordered lists to markdown
 func convertUnorderedLists(content string) string {
+	// First, mark nested lists for special handling
+	// This will enable us to preserve nested list structure
+	content = regexp.MustCompile(`<li[^>]*>(.*?)<ul[^>]*>(.*?)</ul>(.*?)</li>`).
+		ReplaceAllString(content, `<li data-has-child="true">$1<ul>$2</ul>$3</li>`)
+	// Now handle outer lists
 	re := regexp.MustCompile(`<ul[^>]*>(.*?)</ul>`)
 	content = re.ReplaceAllStringFunc(content, func(match string) string {
 		// Extract list items
@@ -753,11 +938,59 @@ func convertUnorderedLists(content string) string {
 		result := "\n" // Start with a newline for proper Markdown spacing
 		for _, item := range items {
 			if len(item) > 1 {
-				// Clean the item content
-				itemContent := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(item[1], "")
-				itemContent = html.UnescapeString(itemContent)
-				itemContent = strings.TrimSpace(itemContent)
-				result += fmt.Sprintf("- %s\n", itemContent)
+				itemContent := item[1]
+
+				// Check if this item has nested lists
+				if strings.Contains(itemContent, "<ul>") {
+					// Process content before the nested list
+					beforeList := itemContent
+					if idx := strings.Index(itemContent, "<ul>"); idx != -1 {
+						beforeList = itemContent[:idx]
+					}
+
+					// Clean the content before the nested list
+					beforeList = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(beforeList, "")
+					beforeList = html.UnescapeString(beforeList)
+					beforeList = strings.TrimSpace(beforeList)
+
+					// Start the item
+					result += fmt.Sprintf("- %s\n", beforeList)
+
+					// Process nested lists with indentation
+					nestedContent := ""
+					if nestedMatch := regexp.MustCompile(`<ul>(.*?)</ul>`).FindStringSubmatch(itemContent); len(nestedMatch) > 1 {
+						// Convert the nested list items with indentation
+						nestedItems := regexp.MustCompile(`<li[^>]*>(.*?)</li>`).FindAllStringSubmatch(nestedMatch[1], -1)
+						for _, nestedItem := range nestedItems {
+							if len(nestedItem) > 1 {
+								nestedText := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(nestedItem[1], "")
+								nestedText = html.UnescapeString(nestedText)
+								nestedText = strings.TrimSpace(nestedText)
+								// Add indentation for nested items
+								nestedContent += fmt.Sprintf("  - %s\n", nestedText)
+							}
+						}
+						result += nestedContent
+					}
+
+					// Process content after the nested list if any
+					afterList := ""
+					if idx := strings.LastIndex(itemContent, "</ul>"); idx != -1 && idx+5 < len(itemContent) {
+						afterList = itemContent[idx+5:]
+						afterList = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(afterList, "")
+						afterList = html.UnescapeString(afterList)
+						afterList = strings.TrimSpace(afterList)
+						if afterList != "" {
+							result += fmt.Sprintf("- %s\n", afterList)
+						}
+					}
+				} else {
+					// Regular item without nested content
+					itemContent = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(itemContent, "")
+					itemContent = html.UnescapeString(itemContent)
+					itemContent = strings.TrimSpace(itemContent)
+					result += fmt.Sprintf("- %s\n", itemContent)
+				}
 			}
 		}
 		result += "\n" // Add newline after the list
@@ -769,6 +1002,10 @@ func convertUnorderedLists(content string) string {
 
 // Helper function to convert ordered lists to numbered plain text
 func convertOrderedListsToPlainText(content string) string {
+	// First, mark nested lists for special handling
+	content = regexp.MustCompile(`<li[^>]*>(.*?)<ol[^>]*>(.*?)</ol>(.*?)</li>`).
+		ReplaceAllString(content, `<li data-has-child="true">$1<ol>$2</ol>$3</li>`)
+
 	re := regexp.MustCompile(`<ol[^>]*>(.*?)</ol>`)
 	content = re.ReplaceAllStringFunc(content, func(match string) string {
 		// Extract list items
@@ -777,10 +1014,58 @@ func convertOrderedListsToPlainText(content string) string {
 
 		result := ""
 		for i, item := range items {
-			// Strip HTML tags from the item content
-			itemContent := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(item[1], "")
-			itemContent = html.UnescapeString(strings.TrimSpace(itemContent))
-			result += fmt.Sprintf("%d. %s\n", i+1, itemContent)
+			if len(item) > 1 {
+				itemContent := item[1]
+
+				// Check if this item has nested lists
+				if strings.Contains(itemContent, "<ol>") {
+					// Process content before the nested list
+					beforeList := itemContent
+					if idx := strings.Index(itemContent, "<ol>"); idx != -1 {
+						beforeList = itemContent[:idx]
+					}
+
+					// Clean the content before the nested list
+					beforeList = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(beforeList, "")
+					beforeList = html.UnescapeString(beforeList)
+					beforeList = strings.TrimSpace(beforeList)
+
+					// Start the item
+					result += fmt.Sprintf("%d. %s\n", i+1, beforeList)
+
+					// Process nested lists with indentation
+					if nestedMatch := regexp.MustCompile(`<ol>(.*?)</ol>`).FindStringSubmatch(itemContent); len(nestedMatch) > 1 {
+						// Convert the nested list items with indentation
+						nestedItems := regexp.MustCompile(`<li[^>]*>(.*?)</li>`).FindAllStringSubmatch(nestedMatch[1], -1)
+						for j, nestedItem := range nestedItems {
+							if len(nestedItem) > 1 {
+								nestedText := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(nestedItem[1], "")
+								nestedText = html.UnescapeString(nestedText)
+								nestedText = strings.TrimSpace(nestedText)
+								// Add indentation for nested items
+								result += fmt.Sprintf("    %d.%d. %s\n", i+1, j+1, nestedText)
+							}
+						}
+					}
+
+					// Process content after the nested list if any
+					afterList := ""
+					if idx := strings.LastIndex(itemContent, "</ol>"); idx != -1 && idx+5 < len(itemContent) {
+						afterList = itemContent[idx+5:]
+						afterList = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(afterList, "")
+						afterList = html.UnescapeString(afterList)
+						afterList = strings.TrimSpace(afterList)
+						if afterList != "" {
+							result += fmt.Sprintf("%d. %s\n", i+2, afterList)
+						}
+					}
+				} else {
+					// Regular item without nested content
+					itemContent = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(itemContent, "")
+					itemContent = html.UnescapeString(strings.TrimSpace(itemContent))
+					result += fmt.Sprintf("%d. %s\n", i+1, itemContent)
+				}
+			}
 		}
 		return result
 	})
@@ -789,6 +1074,10 @@ func convertOrderedListsToPlainText(content string) string {
 
 // Helper function to convert unordered lists to bullet point plain text
 func convertUnorderedListsToPlainText(content string) string {
+	// First, mark nested lists for special handling
+	content = regexp.MustCompile(`<li[^>]*>(.*?)<ul[^>]*>(.*?)</ul>(.*?)</li>`).
+		ReplaceAllString(content, `<li data-has-child="true">$1<ul>$2</ul>$3</li>`)
+
 	re := regexp.MustCompile(`<ul[^>]*>(.*?)</ul>`)
 	content = re.ReplaceAllStringFunc(content, func(match string) string {
 		// Extract list items
@@ -797,10 +1086,58 @@ func convertUnorderedListsToPlainText(content string) string {
 
 		result := ""
 		for _, item := range items {
-			// Strip HTML tags from the item content
-			itemContent := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(item[1], "")
-			itemContent = html.UnescapeString(strings.TrimSpace(itemContent))
-			result += fmt.Sprintf("• %s\n", itemContent)
+			if len(item) > 1 {
+				itemContent := item[1]
+
+				// Check if this item has nested lists
+				if strings.Contains(itemContent, "<ul>") {
+					// Process content before the nested list
+					beforeList := itemContent
+					if idx := strings.Index(itemContent, "<ul>"); idx != -1 {
+						beforeList = itemContent[:idx]
+					}
+
+					// Clean the content before the nested list
+					beforeList = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(beforeList, "")
+					beforeList = html.UnescapeString(beforeList)
+					beforeList = strings.TrimSpace(beforeList)
+
+					// Start the item
+					result += fmt.Sprintf("• %s\n", beforeList)
+
+					// Process nested lists with indentation
+					if nestedMatch := regexp.MustCompile(`<ul>(.*?)</ul>`).FindStringSubmatch(itemContent); len(nestedMatch) > 1 {
+						// Convert the nested list items with indentation
+						nestedItems := regexp.MustCompile(`<li[^>]*>(.*?)</li>`).FindAllStringSubmatch(nestedMatch[1], -1)
+						for _, nestedItem := range nestedItems {
+							if len(nestedItem) > 1 {
+								nestedText := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(nestedItem[1], "")
+								nestedText = html.UnescapeString(nestedText)
+								nestedText = strings.TrimSpace(nestedText)
+								// Add indentation for nested items
+								result += fmt.Sprintf("  • %s\n", nestedText)
+							}
+						}
+					}
+
+					// Process content after the nested list if any
+					afterList := ""
+					if idx := strings.LastIndex(itemContent, "</ul>"); idx != -1 && idx+5 < len(itemContent) {
+						afterList = itemContent[idx+5:]
+						afterList = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(afterList, "")
+						afterList = html.UnescapeString(afterList)
+						afterList = strings.TrimSpace(afterList)
+						if afterList != "" {
+							result += fmt.Sprintf("• %s\n", afterList)
+						}
+					}
+				} else {
+					// Regular item without nested content
+					itemContent = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(itemContent, "")
+					itemContent = html.UnescapeString(strings.TrimSpace(itemContent))
+					result += fmt.Sprintf("• %s\n", itemContent)
+				}
+			}
 		}
 		return result
 	})

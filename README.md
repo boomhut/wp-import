@@ -134,6 +134,7 @@ func truncateString(s string, maxLen int) string {
 ### Content Processing
 
 - `SanitizeWordPressContent(content string) string` - Clean up WordPress content
+- `CleanHTML(content string) string` - Sanitize HTML while preserving HTML structure
 - `ConvertToPlainText(content string) string` - Convert HTML content to plain text
 - `ConvertToMarkdown(content string) string` - Convert HTML content to Markdown
 - `convertOrderedListsToPlainText(content string) string` - Convert `<ol>` lists to numbered plain text
@@ -261,6 +262,31 @@ function example() {
 | Cell 1 | Cell 2 |
 ```
 
+### Sanitizing HTML while Preserving Structure
+
+```go
+htmlContent := `<p>This is <b>bold</b> text with a <font color="red">colored font</font> tag.</p>
+<center>This text is centered</center>
+<p class="wp-block-paragraph aligncenter" style="">Paragraph with WordPress classes</p>
+<div data-wp-block="true" data-align="wide">Block with data attributes</div>
+<ul><li>Bullet</li><li>Another <strong>bullet</strong> with <em>formatting</em></li></ul>`
+
+cleanHTML := wpimport.CleanHTML(htmlContent)
+fmt.Println(cleanHTML)
+```
+
+Output (after cleaning):
+```html
+<p>This is <strong>bold</strong> text with a <span>colored font</span> tag.</p>
+<div style="text-align: center;">This text is centered</div>
+<p>Paragraph with WordPress classes</p>
+<div>Block with data attributes</div>
+<ul>
+  <li>Bullet</li>
+  <li>Another <strong>bullet</strong> with <em>formatting</em></li>
+</ul>
+```
+
 ### Memory Usage
 
 Memory usage is optimized for processing large WordPress exports:
@@ -329,6 +355,30 @@ func convertTables(content string) string {
 These functions work by using regular expressions to locate structured elements in the HTML content, extract their components, and format them according to the target format. They handle proper spacing and ensure that nested content is correctly processed.
 
 ## How It Works
+
+### HTML Cleaning and Sanitization
+
+The `CleanHTML` function provides a way to sanitize WordPress HTML content while preserving its structure:
+
+1. **Remove WordPress-specific Elements**: 
+   - Removes Gutenberg block comments
+   - Cleans out empty paragraphs and unnecessary whitespace
+   
+2. **Fix HTML Structure Issues**:
+   - Repairs unclosed or improperly nested tags
+   - Fixes malformed list structures
+   - Ensures proper HTML structure is maintained
+   
+3. **Modernize HTML**:
+   - Updates deprecated tags to modern HTML5 equivalents
+   - Converts `<center>` to styled divs
+   - Converts `<font>` to spans
+   - Converts `<b>` to `<strong>` and `<i>` to `<em>`
+   
+4. **Clean Up Attributes**:
+   - Removes empty and WordPress-specific attributes
+   - Cleans up unnecessary styling attributes
+   - Removes data attributes that are WordPress-specific
 
 ### HTML to Plain Text Conversion
 

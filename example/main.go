@@ -173,6 +173,11 @@ func main() {
 			// Markdown content
 			markdownContent := wpimport.ConvertToMarkdown(post.Content)
 			fmt.Printf("Markdown Content Preview:\n%s\n\n\n", truncateString(markdownContent, 1700))
+
+			// clean HTML content
+			cleanHTMLContent := wpimport.SanitizeWordPressContent(post.Content)
+			fmt.Printf("Cleaned HTML Content Preview:\n%s\n\n\n", truncateString(cleanHTMLContent, 1700))
+
 		}
 
 	} else {
